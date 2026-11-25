@@ -1,1 +1,1 @@
-window.PRESTES_CATALOGO = {"version":1,"cars":[{"id":"bmw-m4-gt3-evo-teste","criado":"2026-11-24T00:00:00.000Z","marca":"BMW","modelo":"M4 GT3 Evo","ano":2026,"episodio":1,"motor":"3.0 L, seis cilindros em linha biturbo","transmissao":"Sequencial de 6 marchas","potencia":590,"torque":650,"peso":1300,"valor":3200000,"tempo":69876,"velocidade":244,"categoria":"corrida","foto":null,"teste":true}]};
+window.PRESTES_CATALOGO = {"version":1,"cars":[]};
