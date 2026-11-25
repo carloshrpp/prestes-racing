@@ -91,7 +91,15 @@
     return { ...catalog, cars };
   }
 
-  async function publish(token, branch, car, original, newPhoto) {
+  function remove(catalog, original) {
+    const current = catalog.cars.find(item => item.id === original.id);
+    if (!current || JSON.stringify(current) !== JSON.stringify(original)) {
+      throw new Error('A ficha mudou ou já foi excluída. Recarregue o Gerenciar.');
+    }
+    return { ...catalog, cars: catalog.cars.filter(item => item.id !== original.id) };
+  }
+
+  async function commitCatalog(token, branch, message, change) {
     const refPath = '/git/ref/heads/' + branch.split('/').map(encodeURIComponent).join('/');
     const ref = await github(refPath, token);
     const head = ref.object.sha;
@@ -99,24 +107,35 @@
       github('/git/commits/' + head, token),
       github('/contents/' + dataPath + '?ref=' + head, token)
     ]);
-    const catalog = upsert(decodeCatalog(file.content), car, original);
-    const entries = [];
-    if (newPhoto) {
-      const photo = await github('/git/blobs', token, 'POST', { content: newPhoto.split(',')[1], encoding: 'base64' });
-      entries.push({ path: car.foto, mode: '100644', type: 'blob', sha: photo.sha });
-      if (original?.foto && original.foto !== car.foto && original.foto.startsWith('assets/carros/' + car.id + '.')) {
-        entries.push({ path: original.foto, mode: '100644', type: 'blob', sha: null });
-      }
-    }
+    const { catalog, entries = [] } = await change(decodeCatalog(file.content));
     entries.push({ path: dataPath, mode: '100644', type: 'blob', content: prefix + JSON.stringify(catalog) + ';\n' });
     const tree = await github('/git/trees', token, 'POST', { base_tree: parent.tree.sha, tree: entries });
-    const commit = await github('/git/commits', token, 'POST', {
-      message: 'Prestes Racing: ' + (original ? 'atualizar ' : 'cadastrar ') + name(car), tree: tree.sha, parents: [head]
-    });
+    const commit = await github('/git/commits', token, 'POST', { message, tree: tree.sha, parents: [head] });
     await github(refPath.replace('/git/ref/', '/git/refs/'), token, 'PATCH', { sha: commit.sha, force: false });
     return commit.sha;
   }
 
+  function publish(token, branch, car, original, newPhoto) {
+    const message = 'Prestes Racing: ' + (original ? 'atualizar ' : 'cadastrar ') + name(car);
+    return commitCatalog(token, branch, message, async current => {
+      const catalog = upsert(current, car, original);
+      const entries = [];
+      if (newPhoto) {
+        const photo = await github('/git/blobs', token, 'POST', { content: newPhoto.split(',')[1], encoding: 'base64' });
+        entries.push({ path: car.foto, mode: '100644', type: 'blob', sha: photo.sha });
+        if (original?.foto && original.foto !== car.foto && original.foto.startsWith('assets/carros/' + car.id + '.')) {
+          entries.push({ path: original.foto, mode: '100644', type: 'blob', sha: null });
+        }
+      }
+      return { catalog, entries };
+    });
+  }
+
+  function publishRemoval(token, branch, original) {
+    return commitCatalog(token, branch, 'Prestes Racing: excluir ' + name(original),
+      current => ({ catalog: remove(current, original) }));
+  }
+
   window.PrestesData = { categories, orders, decimal, currency, name, lap, parseLap, ordered, position, latest,
-    normalize, readDraft, saveDraft, preview, validateToken, publish, upsert, remote };
+    normalize, readDraft, saveDraft, preview, validateToken, publish, publishRemoval, upsert, remove, remote };
 })();

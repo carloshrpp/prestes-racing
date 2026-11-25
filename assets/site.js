@@ -281,12 +281,12 @@
     const input = main.querySelector('#token');
     const status = main.querySelector('#token-status');
     const validate = main.querySelector('#validate');
-    const publish = main.querySelector('#publish');
+    const writeButtons = main.querySelectorAll('#publish, #confirm-delete');
     let access = null;
     input.addEventListener('input', () => {
       access = null;
       status.textContent = '';
-      if (publish) publish.disabled = true;
+      writeButtons.forEach(button => { button.disabled = true; });
     });
     validate.onclick = async () => {
       const token = input.value.trim();
@@ -297,7 +297,7 @@
       try {
         access = { token, branch: await D.validateToken(token) };
         status.textContent = 'Token validado com permissão de escrita.';
-        if (publish) publish.disabled = false;
+        writeButtons.forEach(button => { button.disabled = false; });
       } catch (error) {
         status.textContent = error.message;
       } finally {
@@ -310,6 +310,7 @@
 
   function carForm() {
     const edit = page === 'editar';
+    const localPreview = D.preview() && location.protocol !== 'file:';
     if (edit && !current) {
       main.innerHTML = '<section class="wrap content">' + intro('Ficha indisponível') +
         link('gerenciar', 'Voltar a Gerenciar') + '</section>';
@@ -342,11 +343,13 @@
       '</div><h2>Foto no showroom</h2><label>Arquivo JPG, PNG ou WebP<input name="foto" type="file" accept="image/jpeg,image/png,image/webp"' +
       (edit ? '' : ' required') + '></label>' + (edit ? '<div class="form-photo">' + photo(current) + '</div>' : '') +
       tokenPanel() + '<div class="form-actions"><button id="publish" type="submit" disabled>Publicar</button>' +
-      (D.preview() && location.protocol !== 'file:' ? '<button id="local-save" type="submit" class="secondary">Salvar teste local</button>' : '') +
-      '</div><p class="status" id="save-status" role="status"></p></form></section>';
+      (localPreview ? '<button id="local-save" type="submit" class="secondary">Salvar teste local</button>' : '') +
+      '</div><p class="status" id="save-status" role="status"></p>' +
+      (edit ? removalPanel(localPreview) : '') + '</form></section>';
     const getAccess = tokenControls();
     const form = main.querySelector('#car-form');
     const status = main.querySelector('#save-status');
+    if (edit) removalControls(form, getAccess);
     form.onsubmit = async event => {
       event.preventDefault();
       const local = event.submitter?.id === 'local-save';
@@ -399,6 +402,52 @@
         if (!done) buttons.forEach((button, index) => { button.disabled = oldDisabled[index]; });
       }
     };
+  }
+
+  function removalPanel(localPreview) {
+    return '<details id="remove-car" class="token-panel"><summary>Excluir carro</summary>' +
+      '<p>Remover <strong>' + escapeHtml(D.name(current)) + '</strong> do catálogo? A ficha sai da Garagem, e o Ranking e os Recordes são recalculados. ' +
+      'Valide o token acima para confirmar a exclusão no GitHub.</p><div class="form-actions">' +
+      '<button type="button" id="confirm-delete" disabled>Confirmar exclusão</button>' +
+      '<button type="button" id="cancel-delete" class="secondary">Cancelar</button>' +
+      (localPreview ? '<button type="button" id="local-delete" class="secondary">Excluir teste local</button>' : '') +
+      '</div><p class="status" id="delete-status" role="status"></p></details>';
+  }
+
+  function removalControls(form, getAccess) {
+    const details = form.querySelector('#remove-car');
+    const status = form.querySelector('#delete-status');
+    const cancel = form.querySelector('#cancel-delete');
+    const local = form.querySelector('#local-delete');
+    const token = form.querySelector('#token');
+    const summary = details.querySelector('summary');
+    cancel.onclick = () => {
+      details.open = false;
+      summary.focus();
+    };
+    form.querySelector('#confirm-delete').onclick = () => submitRemoval(false);
+    if (local) local.onclick = () => submitRemoval(true);
+
+    async function submitRemoval(isLocal) {
+      const access = getAccess();
+      if (!isLocal && !access) return;
+      const controls = [...form.querySelectorAll('button'), token];
+      const states = controls.map(control => control.disabled);
+      controls.forEach(control => { control.disabled = true; });
+      status.textContent = isLocal ? 'Excluindo teste local…' : 'Excluindo no GitHub…';
+      try {
+        if (isLocal) {
+          D.saveDraft(D.remove(D.readDraft() || catalog, current));
+          location.href = url('gerenciar');
+        } else {
+          await D.publishRemoval(access.token, access.branch, current);
+          status.textContent = 'Carro excluído no GitHub. O site será atualizado pelo GitHub Pages.';
+        }
+      } catch (error) {
+        status.textContent = error instanceof Error ? error.message : 'Não foi possível excluir. Tente novamente.';
+        controls.forEach((control, index) => { control.disabled = states[index]; });
+      }
+    }
   }
 
   async function loadPhoto(file) {
