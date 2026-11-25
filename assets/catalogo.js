@@ -13,7 +13,7 @@
     peso: ['Menor peso', (a, b) => a.peso - b.peso]
   };
   const decimal = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
-  const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'USD' });
   const key = 'prestes-racing-v1-catalogo-local';
   const remote = 'carloshrpp/prestes-racing';
   const dataPath = 'data/carros.js';

@@ -195,7 +195,7 @@
   function garage() {
     main.innerHTML = '<section class="wrap content">' + intro('Garagem', 'Fichas dos carros testados na pista, por tempo de volta.') +
       '<div class="filters garage-filters"><label>Marca ou modelo<input id="search" type="search" placeholder="Buscar na garagem"></label>' +
-      '<fieldset><legend>Faixa de preço (R$)</legend><label>Mínimo<input id="min" type="number" min="0" inputmode="decimal"></label>' +
+      '<fieldset><legend>Faixa de preço (US$)</legend><label>Mínimo<input id="min" type="number" min="0" inputmode="decimal"></label>' +
       '<label>Máximo<input id="max" type="number" min="0" inputmode="decimal"></label></fieldset></div>' +
       '<div id="result" tabindex="-1" aria-live="polite"></div></section>';
     const search = main.querySelector('#search');
@@ -228,7 +228,7 @@
     const cat = D.categories[car.categoria];
     const tech = [['Ano', car.ano], ['Categoria', cat], ['Motor', car.motor], ['Transmissão', car.transmissao],
       ['Potência', unit(car.potencia, 'cv')], ['Torque', unit(car.torque, 'Nm')], ['Peso', unit(car.peso, 'kg')],
-      ['Valor', priceText(car.valor)]];
+      ['Valor de referência', priceText(car.valor)]];
     const stats = [['Melhor volta', D.lap(car.tempo)], ['Velocidade máxima na pista', unit(car.velocidade, 'km/h')],
       ['Posição no Geral', D.position(cars, car) + 'º'],
       ['Posição em ' + cat, D.position(cars.filter(other => other.categoria === car.categoria), car) + 'º']];
@@ -341,7 +341,7 @@
       Object.entries(D.categories).map(([key, name]) => '<option value="' + key + '"' +
         (current?.categoria === key ? ' selected' : '') + '>' + name + '</option>').join('') + '</select></label>';
     const unknownPrice = edit && !hasPrice(current.valor);
-    const priceField = '<div class="price-field"><label>Valor (R$)<input name="valor" type="number" min="0.01" max="999999999" step="0.01"' +
+    const priceField = '<div class="price-field"><label>Valor de referência (US$)<input name="valor" type="number" min="0.01" max="999999999" step="0.01"' +
       (unknownPrice ? ' disabled' : ' required') + ' value="' + (hasPrice(current?.valor) ? current.valor : '') +
       '"></label><label class="price-option"><input id="unknown-price" name="semValor" type="checkbox"' +
       (unknownPrice ? ' checked' : '') + '> Sem valor estimado</label></div>';
@@ -382,7 +382,7 @@
       if (!car.tempo) { status.textContent = 'Informe uma volta maior que zero.'; return; }
       car.valor = data.has('semValor') ? null : Number(data.get('valor'));
       if (car.valor !== null && !hasPrice(car.valor)) {
-        status.textContent = 'Informe um valor em reais ou marque Sem valor estimado.';
+        status.textContent = 'Informe um valor em dólares ou marque Sem valor estimado.';
         return;
       }
       car.categoria = data.get('categoria');
