@@ -1,1 +1,1 @@
-window.PRESTES_CATALOGO = {"version":1,"cars":[]};
+window.PRESTES_CATALOGO = {"version":1,"cars":[{"id":"b9c01108-8445-4bfe-b581-fe654e144e81","criado":"2026-11-25T13:58:43.746Z","marca":"Lamborghini","modelo":"Reventón","ano":2008,"episodio":1,"motor":"V12 6.5 aspirado","transmissao":"e-gear automatizada de 6 marchas","potencia":670,"torque":660,"peso":1.69,"valor":11400000,"tempo":82422,"velocidade":236,"categoria":"supercarros","foto":"assets/carros/b9c01108-8445-4bfe-b581-fe654e144e81.webp"}]};
