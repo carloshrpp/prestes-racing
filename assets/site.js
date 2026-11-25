@@ -30,6 +30,8 @@
     '<div class="car-photo photo-empty">Foto do showroom pendente</div>' : '<img class="car-photo" src="' + escapeHtml(car.foto.startsWith('data:image/webp;base64,') ? car.foto : root + car.foto) +
     '" alt="' + escapeHtml(D.name(car) + ' no showroom') + '"' + (lazy ? ' loading="lazy"' : '') + '>';
   const unit = (value, symbol) => D.decimal.format(value) + ' ' + symbol;
+  const hasPrice = value => Number.isFinite(value) && value > 0;
+  const priceText = value => hasPrice(value) ? D.currency.format(value) : 'Sem valor estimado';
   const base = page === 'carro' ? 'garagem' : ['adicionar', 'editar'].includes(page) ? 'gerenciar' : page;
   const brand = '<span class="monogram" aria-hidden="true">P</span><span class="wordmark">PRESTES<small>RACING</small></span>';
   const section = (title, body, action = '') => '<section class="section wrap"><div class="section-head"><h2>' +
@@ -69,7 +71,7 @@
     return '<div class="car-grid' + (showPrice ? ' garage-grid' : '') + '">' +
       items.map(car => '<a class="car-card" href="' + url('carro', car.id) + '">' + photo(car) +
         '<div class="card-copy"><h3>' + escapeHtml(D.name(car)) + '</h3><span class="lap">' + D.lap(car.tempo) +
-        '</span>' + (showPrice ? '<span class="price">' + D.currency.format(car.valor) + '</span>' : '') +
+        '</span>' + (showPrice ? '<span class="price">' + priceText(car.valor) + '</span>' : '') +
         '</div></a>').join('') + '</div>';
   }
 
@@ -205,7 +207,9 @@
       const high = max.value ? Number(max.value) : Infinity;
       if (low < 0 || high < low) { result.innerHTML = empty('Informe uma faixa de preço válida.'); return; }
       const query = D.normalize(search.value.trim());
-      const items = byLap.filter(car => D.normalize(D.name(car)).includes(query) && car.valor >= low && car.valor <= high);
+      const hasRange = min.value !== '' || max.value !== '';
+      const items = byLap.filter(car => D.normalize(D.name(car)).includes(query) &&
+        (!hasRange || (hasPrice(car.valor) && car.valor >= low && car.valor <= high)));
       const offset = (pageNumber - 1) * 20;
       result.innerHTML = cards(items.slice(offset, offset + 20), true);
       paginate(items.length, 20, pageNumber, result, render);
@@ -224,7 +228,7 @@
     const cat = D.categories[car.categoria];
     const tech = [['Ano', car.ano], ['Categoria', cat], ['Motor', car.motor], ['Transmissão', car.transmissao],
       ['Potência', unit(car.potencia, 'cv')], ['Torque', unit(car.torque, 'Nm')], ['Peso', unit(car.peso, 'kg')],
-      ['Valor', D.currency.format(car.valor)]];
+      ['Valor', priceText(car.valor)]];
     const stats = [['Melhor volta', D.lap(car.tempo)], ['Velocidade máxima na pista', unit(car.velocidade, 'km/h')],
       ['Posição no Geral', D.position(cars, car) + 'º'],
       ['Posição em ' + cat, D.position(cars.filter(other => other.categoria === car.categoria), car) + 'º']];
@@ -320,7 +324,7 @@
       ['marca', 'Marca'], ['modelo', 'Modelo'], ['ano', 'Ano', 'number', '1886', '2100', '1'],
       ['episodio', 'Episódio', 'number', '1', '99999', '1'], ['motor', 'Motor'], ['transmissao', 'Transmissão'],
       ['potencia', 'Potência (cv)', 'number'], ['torque', 'Torque (Nm)', 'number'], ['peso', 'Peso (kg)', 'number'],
-      ['valor', 'Valor (R$)', 'number', '0'], ['tempo', 'Melhor volta', 'text'],
+      ['tempo', 'Melhor volta', 'text'],
       ['velocidade', 'Velocidade máxima na pista (km/h)', 'number']
     ];
     const ids = crypto.randomUUID ? () => crypto.randomUUID() : () =>
@@ -336,10 +340,15 @@
     const category = '<label>Categoria<select required name="categoria"><option value="">Selecione</option>' +
       Object.entries(D.categories).map(([key, name]) => '<option value="' + key + '"' +
         (current?.categoria === key ? ' selected' : '') + '>' + name + '</option>').join('') + '</select></label>';
+    const unknownPrice = edit && !hasPrice(current.valor);
+    const priceField = '<div class="price-field"><label>Valor (R$)<input name="valor" type="number" min="0.01" max="999999999" step="0.01"' +
+      (unknownPrice ? ' disabled' : ' required') + ' value="' + (hasPrice(current?.valor) ? current.valor : '') +
+      '"></label><label class="price-option"><input id="unknown-price" name="semValor" type="checkbox"' +
+      (unknownPrice ? ' checked' : '') + '> Sem valor estimado</label></div>';
     main.innerHTML = '<section class="wrap content form-page">' + link('gerenciar', 'Voltar a Gerenciar', 'back-link') +
       intro(edit ? 'Editar carro' : 'Adicionar carro') +
-      '<form id="car-form"><h2>Ficha técnica</h2><div class="form-grid">' + inputs.slice(0, 10).map(field).join('') +
-      category + '</div><h2>Dados da volta</h2><div class="form-grid">' + inputs.slice(10).map(field).join('') +
+      '<form id="car-form"><h2>Ficha técnica</h2><div class="form-grid">' + inputs.slice(0, -2).map(field).join('') +
+      priceField + category + '</div><h2>Dados da volta</h2><div class="form-grid">' + inputs.slice(-2).map(field).join('') +
       '</div><h2>Foto no showroom</h2><label>Arquivo JPG, PNG ou WebP<input name="foto" type="file" accept="image/jpeg,image/png,image/webp"' +
       (edit ? '' : ' required') + '></label>' + (edit ? '<div class="form-photo">' + photo(current) + '</div>' : '') +
       tokenPanel() + '<div class="form-actions"><button id="publish" type="submit" disabled>Publicar</button>' +
@@ -349,6 +358,14 @@
     const getAccess = tokenControls();
     const form = main.querySelector('#car-form');
     const status = main.querySelector('#save-status');
+    const priceInput = form.elements.namedItem('valor');
+    const noPrice = form.elements.namedItem('semValor');
+    function updatePriceField() {
+      priceInput.disabled = noPrice.checked;
+      priceInput.required = !noPrice.checked;
+    }
+    noPrice.onchange = updatePriceField;
+    updatePriceField();
     if (edit) removalControls(form, getAccess);
     form.onsubmit = async event => {
       event.preventDefault();
@@ -363,6 +380,11 @@
         car[key] = key === 'tempo' ? D.parseLap(value) : type === 'number' ? Number(value) : value;
       }
       if (!car.tempo) { status.textContent = 'Informe uma volta maior que zero.'; return; }
+      car.valor = data.has('semValor') ? null : Number(data.get('valor'));
+      if (car.valor !== null && !hasPrice(car.valor)) {
+        status.textContent = 'Informe um valor em reais ou marque Sem valor estimado.';
+        return;
+      }
       car.categoria = data.get('categoria');
       const buttons = [...form.querySelectorAll('button')];
       const oldDisabled = buttons.map(button => button.disabled);

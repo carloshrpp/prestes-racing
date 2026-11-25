@@ -114,6 +114,8 @@ fieldset label{font-weight:400;max-width:150px}
 .token-panel .status{margin-bottom:0}
 .form-page{max-width:940px}
 .form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:12px 0 24px}
+.price-option{display:flex;align-items:center;gap:8px;margin-top:7px;font-weight:400}
+.price-option input{width:16px;min-height:16px;margin:0;accent-color:var(--gold)}
 .form-page label:has([type=file]){margin-top:12px}
 .form-actions{margin:18px 0 10px}
 .form-photo{max-width:280px;margin-top:14px}
