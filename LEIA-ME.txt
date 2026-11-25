@@ -1,0 +1,33 @@
+PRESTES RACING 1.2
+=================
+
+1. Extraia o ZIP inteiro em uma pasta.
+2. Abra index.html no Chrome, Edge ou Firefox.
+
+A BMW M4 GT3 Evo é o único carro da prévia. Todos os seus números
+foram inventados para demonstrar a ficha, a garagem e o ranking.
+
+Fotos da pista
+--------------
+O carrossel alterna entre a reta dos boxes, a curva e a vista aérea.
+Use os botões para avançar, voltar ou pausar. Para incluir outras fotos,
+coloque os arquivos em assets e liste-os em assets/pista.js.
+
+Cadastro local (opcional)
+------------------------
+Para testar cadastro e edição antes da publicação, sirva a pasta
+extraída com um servidor local. Se você tiver Python, abra o terminal
+na pasta extraída e rode: python -m http.server 8000
+Abra http://localhost:8000 e use Gerenciar > Salvar teste local.
+Os registros de teste ficam no navegador usado para o cadastro.
+
+A publicação depende da configuração futura do repositório GitHub Pages.
+A prévia usa os arquivos locais, inclusive as fotos e as fontes.
+
+Mapa da pista
+-------------
+Autodromo di Magione Track Layout, de Blanders506. Adaptado para a paleta do Prestes Motorsport Park, com 11 curvas
+numeradas. CC BY-SA 4.0.
+https://commons.wikimedia.org/wiki/File:Autodromo_di_Magione_Track_Layout.svg
+https://creativecommons.org/licenses/by-sa/4.0/
+Dados do circuito: https://trackdaysmagione.perugiatiming.com/Autodromo
