@@ -48,7 +48,7 @@
     if (location.protocol === 'file:') {
       main.innerHTML = '<section class="wrap content">' + intro('Gerenciar') +
         '<div class="token-panel"><h2>Gerenciar no site publicado</h2>' +
-        '<p>Depois de enviar a V2.1 ao GitHub, abra o Gerenciar no site e valide o token. ' +
+        '<p>Depois de enviar a atualização ao GitHub, abra o Gerenciar no site e valide o token. ' +
         'De lá você já pode editar um carro e abrir a prévia da ficha antes de publicar.</p>' +
         '<a class="button" href="https://carloshrpp.github.io/prestes-racing/gerenciar/index.html">' +
         'Abrir Gerenciar no site</a></div></section>';
@@ -282,16 +282,29 @@
       };
     }
 
-    function draftList(drafts) {
+    function lotDraftActions(draft, lot) {
+      const options = work.lots.filter(item => item.id !== lot.id).map(item =>
+        '<option value="' + esc(item.id) + '">' + esc(item.name) + '</option>').join('');
+      const holder = esc(draft.car.id);
+      return '<form class="form-actions" data-lot-draft="' + holder + '">' +
+        (options ? '<label>Destino<select name="destino" aria-label="Destino de ' + esc(draftName(draft)) +
+          '" required><option value="">Escolha outro lote</option>' + options +
+          '</select></label><button type="submit" class="secondary">Mover para outro lote</button>' : '') +
+        '<button type="button" class="secondary" data-unassign>Mover para Rascunhos</button></form>';
+    }
+
+    function draftList(drafts, lot) {
       if (!drafts.length) return empty('Nenhum rascunho encontrado.');
       return '<ul class="admin-list draft-list">' + drafts.map(draft => {
         const { errors, reminders } = problems(draft);
         return '<li data-has-photo-pending="' + reminders.includes(imageReminder) + '"><div><strong>' + esc(draftName(draft)) +
-          '</strong><small>' + esc([draft.car.tempo && D.lap(draft.car.tempo), draft.lotId && 'Lote: ' + lotName(draft.lotId),
+          '</strong><small>' + esc([draft.car.episodio && 'Volta Rápida nº ' + draft.car.episodio,
+            draft.car.tempo && D.lap(draft.car.tempo), draft.lotId && 'Lote: ' + lotName(draft.lotId),
             errors.length ? errors.length + ' erros' : 'Ficha pronta'].filter(Boolean).join(' · ')) + '</small>' +
           reminders.map(note => '<small>' + esc(note) + '</small>').join('') +
-          '</div><div class="form-actions"><a class="button secondary" href="' + draftUrl(draft) +
-          '">Editar</a><a class="button secondary" href="' + previewUrl(draft) + '">Prévia da ficha</a></div></li>';
+          '</div><div><div class="form-actions"><a class="button secondary" href="' + draftUrl(draft) +
+          '">Editar</a><a class="button secondary" href="' + previewUrl(draft) + '">Prévia da ficha</a></div>' +
+          (lot ? lotDraftActions(draft, lot) : '') + '</div></li>';
       }).join('') + '</ul>';
     }
 
@@ -306,6 +319,44 @@
         rows.forEach(row => { row.hidden = filter.checked && row.dataset.hasPhotoPending !== 'true'; });
         main.querySelector('#no-drafts').hidden = rows.some(row => !row.hidden);
       };
+    }
+
+    function readLotName(form, currentId) {
+      const name = new FormData(form).get('nome').trim();
+      if (!name) throw new Error('Informe o nome do lote.');
+      if (work.lots.some(item => item.id !== currentId && D.normalize(item.name) === D.normalize(name))) {
+        throw new Error('Já existe um lote com esse nome.');
+      }
+      return name;
+    }
+
+    async function changeLot(makeUpdate, after) {
+      if (busy) return;
+      busy = true;
+      try {
+        await update(makeUpdate());
+        after();
+      } catch (error) { tell(error.message); }
+      finally { busy = false; }
+    }
+
+    function moveDraft(draft, destination) {
+      const target = destination && work.lots.find(item => item.id === destination && item.id !== draft.lotId);
+      if (destination && !target) { tell('Escolha outro lote para mover a ficha.'); return; }
+      return changeLot(() => ({ ...work, drafts: work.drafts.map(item =>
+        item.car.id === draft.car.id ? { ...item, lotId: destination, updated: newId() } : item) }), () => {
+        render();
+        tell(draftName(draft) + (target ? ' movido para o lote ' + target.name + '.' : ' movido para Rascunhos.'));
+      });
+    }
+
+    function lotSettings(lot, draftCount) {
+      return '<details class="token-panel"><summary>Editar lote</summary>' +
+        '<form id="rename-lot" class="admin-bar"><label>Nome do lote<input name="nome" maxlength="90" value="' +
+        esc(lot.name) + '" required></label><button type="submit">Salvar nome</button></form></details>' +
+        '<details class="token-panel"><summary>Excluir lote</summary><p>' +
+        (draftCount ? 'As fichas deste lote voltarão para Rascunhos com fotos e pendências.' : 'Este lote está vazio.') +
+        '</p><button type="button" id="delete-lot" class="secondary">Confirmar exclusão do lote</button></details>';
     }
 
     function showLots() {
@@ -323,22 +374,16 @@
               ' carros · ' + summaryText(drafts) + '</small></span>' +
               link('lotes', 'Abrir lote', 'button secondary', item.id) + '</li>';
           }).join('') + '</ul>');
-        main.querySelector('#create-lot').onsubmit = async event => {
+        main.querySelector('#create-lot').onsubmit = event => {
           event.preventDefault();
-          if (busy) return;
-          const name = new FormData(event.currentTarget).get('nome').trim();
-          if (!name) { tell('Informe o nome do lote.'); return; }
-          if (work.lots.some(item => D.normalize(item.name) === D.normalize(name))) { tell('Já existe um lote com esse nome.'); return; }
-          const item = { id: newId(), name };
-          busy = true;
-          try {
+          const form = event.currentTarget;
+          const item = { id: newId() };
+          return changeLot(() => {
+            item.name = readLotName(form);
             const drafts = work.drafts.map(draft => draft.car.id === draftForNewLot ?
               { ...draft, lotId: item.id, updated: newId() } : draft);
-            await update({ ...work, lots: [...work.lots, item], drafts });
-            go(lotUrl(item.id));
-          }
-          catch (error) { tell(error.message); }
-          finally { busy = false; }
+            return { ...work, lots: [...work.lots, item], drafts };
+          }, () => go(lotUrl(item.id)));
         };
         return;
       }
@@ -351,20 +396,37 @@
         '<button type="button" id="publish-lot"' + (!drafts.length || totals.errors ? ' disabled' : '') + '>Publicar lote</button>' +
         '</div>' + (loose.length ? '<form id="add-draft" class="admin-bar token-panel"><label>Rascunho<select name="draft" required>' +
           loose.map(draft => '<option value="' + draft.car.id + '">' + esc(draftName(draft)) + '</option>').join('') +
-          '</select></label><button type="submit" class="secondary">Adicionar ao lote</button></form>' : '') + draftList(drafts));
+          '</select></label><button type="submit" class="secondary">Adicionar ao lote</button></form>' : '') +
+        draftList(drafts, lot) + lotSettings(lot, drafts.length));
       const add = main.querySelector('#add-draft');
-      if (add) add.onsubmit = async event => {
+      if (add) add.onsubmit = event => {
         event.preventDefault();
-        if (busy) return;
         const choice = new FormData(add).get('draft');
-        busy = true;
-        try {
-          await update({ ...work, drafts: work.drafts.map(draft =>
-            draft.car.id === choice ? { ...draft, lotId: lot.id, updated: newId() } : draft) });
-          render();
-        } catch (error) { tell(error.message); }
-        finally { busy = false; }
+        const draft = loose.find(item => item.car.id === choice);
+        if (draft) return moveDraft(draft, lot.id);
       };
+      main.querySelectorAll('[data-lot-draft]').forEach(form => {
+        const draft = drafts.find(item => item.car.id === form.dataset.lotDraft);
+        form.onsubmit = event => {
+          event.preventDefault();
+          const destination = new FormData(form).get('destino');
+          if (destination) return moveDraft(draft, destination);
+        };
+        form.querySelector('[data-unassign]').onclick = () => moveDraft(draft, '');
+      });
+      main.querySelector('#rename-lot').onsubmit = event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        return changeLot(() => {
+          const name = readLotName(form, lot.id);
+          return { ...work, lots: work.lots.map(item => item.id === lot.id ? { ...item, name } : item) };
+        }, () => { render(); tell('Nome do lote atualizado.'); });
+      };
+      main.querySelector('#delete-lot').onclick = () => changeLot(() => ({
+        ...work,
+        lots: work.lots.filter(item => item.id !== lot.id),
+        drafts: work.drafts.map(draft => draft.lotId === lot.id ? { ...draft, lotId: '', updated: newId() } : draft)
+      }), () => go(url('lotes')));
       main.querySelector('#publish-lot').onclick = () => publish(drafts, lot);
     }
 
@@ -471,7 +533,8 @@
           const draft = { car, original, photo: image, notes, lapInput, lotId: action === 'draft' ? '' : (lotId || stored?.lotId || '') };
           const changed = (value) => JSON.stringify({ ...value, updated: undefined });
           draft.updated = stored && changed(stored) === changed(draft) ? stored.updated : newId();
-          await update({ ...work, drafts: [...work.drafts.filter(item => item.car.id !== car.id), draft] });
+          const drafts = stored ? work.drafts.map(item => item.car.id === car.id ? draft : item) : [...work.drafts, draft];
+          await update({ ...work, drafts });
           if (action === 'publish') {
             const { errors } = problems(draft);
             if (errors.length) {
@@ -496,8 +559,10 @@
 
     function showPreview() {
       const draft = work.drafts.find(item => item.car.id === id);
-      frame('Prévia da ficha', draft ? '<a class="button secondary" href="' + draftUrl(draft) +
-        '">Voltar à edição</a>' : empty('Rascunho indisponível.'), { panels: false });
+      frame('Prévia da ficha', draft ? '<div class="form-actions"><a class="button secondary" href="' + draftUrl(draft) +
+        '">Voltar à edição</a>' + (draft.lotId ? link('lotes', 'Voltar ao lote', 'button secondary', draft.lotId) :
+        link('rascunhos', 'Voltar a Rascunhos', 'button secondary')) + '</div>' :
+        empty('Rascunho indisponível.'), { panels: false });
       if (!draft) return;
       const group = draft.lotId ? work.drafts.filter(item => item.lotId === draft.lotId) : [draft];
       const ids = new Set(group.map(item => item.car.id));
