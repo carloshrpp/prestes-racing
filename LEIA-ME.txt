@@ -1,33 +1,33 @@
-PRESTES RACING 1.2
-=================
+PRESTES RACING V2.1
+===================
 
-1. Extraia o ZIP inteiro em uma pasta.
-2. Abra index.html no Chrome, Edge ou Firefox.
+Veja a prévia
+Extraia o ZIP inteiro e abra index.html no navegador.
 
-A BMW M4 GT3 Evo é o único carro da prévia. Todos os seus números
-foram inventados para demonstrar a ficha, a garagem e o ranking.
+Envie ao GitHub
+1. Abra o repositório carloshrpp/prestes-racing, na branch main.
+2. Em Add file > Upload files, arraste o conteúdo da pasta extraída.
+   Mantenha as pastas juntas e envie o conteúdo na raiz do repositório.
+3. Clique em Commit changes e aguarde a atualização do GitHub Pages.
+4. Abra https://carloshrpp.github.io/prestes-racing/.
 
-Fotos da pista
---------------
-O carrossel alterna entre a reta dos boxes, a curva e a vista aérea.
-Use os botões para avançar, voltar ou pausar. Para incluir outras fotos,
-coloque os arquivos em assets e liste-os em assets/pista.js.
+O pacote inclui o catálogo e as fotos dos 13 carros do commit
+c64004c22d7f9067e0e93f302854dc4080604b7c. Se você já cadastrou outro
+carro depois dessa versão, preserve o data/carros.js mais recente.
 
-Cadastro local (opcional)
-------------------------
-Para testar cadastro e edição antes da publicação, sirva a pasta
-extraída com um servidor local. Se você tiver Python, abra o terminal
-na pasta extraída e rode: python -m http.server 8000
-Abra http://localhost:8000 e use Gerenciar > Salvar teste local.
-Os registros de teste ficam no navegador usado para o cadastro.
+Teste o Gerenciar direto no site
+1. Abra Gerenciar e valide o token, com leitura e escrita em Contents.
+2. Em Carros, clique em Editar na ficha que quer testar.
+3. Clique em Prévia da ficha para ver o resultado.
+4. Se estiver tudo certo, publique agora ou adicione a um lote.
 
-A publicação depende da configuração futura do repositório GitHub Pages.
-A prévia usa os arquivos locais, inclusive as fotos e as fontes.
+Valide o token uma vez por sessão. Rascunhos e lotes ficam salvos no
+navegador em que foram criados. O histórico de recordes começa nas
+publicações feitas pela V2 ou posterior.
 
 Mapa da pista
--------------
-Autodromo di Magione Track Layout, de Blanders506. Adaptado para a paleta do Prestes Motorsport Park, com 11 curvas
-numeradas. CC BY-SA 4.0.
+Autodromo di Magione Track Layout, de Blanders506. Adaptado para a paleta
+do Prestes Motorsport Park, com 11 curvas numeradas. CC BY-SA 4.0.
 https://commons.wikimedia.org/wiki/File:Autodromo_di_Magione_Track_Layout.svg
 https://creativecommons.org/licenses/by-sa/4.0/
 Dados do circuito: https://trackdaysmagione.perugiatiming.com/Autodromo

@@ -1,4 +1,4 @@
-(() => {
+(async () => {
   'use strict';
 
   const D = window.PrestesData;
@@ -6,7 +6,7 @@
   const page = document.body.dataset.page;
   const main = document.querySelector('main');
   const params = new URLSearchParams(location.search);
-  const localDraft = D.preview() && location.protocol !== 'file:' ? D.readDraft() : null;
+  const localDraft = D.preview() && location.protocol !== 'file:' ? await D.load('preview').catch(() => null) : null;
   const catalog = localDraft || window.PRESTES_CATALOGO;
   const cars = catalog.cars;
   const byLap = D.ordered(cars);
@@ -14,11 +14,14 @@
   const current = cars.find(car => car.id === params.get('id'));
   const nav = { inicio: ['', 'Início'], ranking: ['ranking/', 'Ranking'], garagem: ['garagem/', 'Garagem'],
     recordes: ['recordes/', 'Recordes'], gerenciar: ['gerenciar/', 'Gerenciar'],
-    adicionar: ['gerenciar/adicionar/'], editar: ['gerenciar/editar/'], carro: ['garagem/carro/'] };
+    adicionar: ['gerenciar/adicionar/'], editar: ['gerenciar/editar/'], carro: ['garagem/carro/'],
+    pista: ['pista/'], comparar: ['garagem/comparar/'], rascunhos: ['gerenciar/rascunhos/'],
+    lotes: ['gerenciar/lotes/'], previa: ['gerenciar/previa/'] };
   const titles = {
     tempo: ['Volta mais rápida', car => D.lap(car.tempo)],
     velocidade: ['Maior velocidade na pista', car => D.decimal.format(car.velocidade) + ' km/h'],
-    potencia: ['Maior potência', car => D.decimal.format(car.potencia) + ' cv']
+    potencia: ['Maior potência', car => unit(car.potencia, 'cv')],
+    valor: ['Carro mais valioso', car => priceText(car.valor)]
   };
   const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -29,10 +32,12 @@
   const photo = (car, lazy = true) => !car.foto ?
     '<div class="car-photo photo-empty">Foto do showroom pendente</div>' : '<img class="car-photo" src="' + escapeHtml(car.foto.startsWith('data:image/webp;base64,') ? car.foto : root + car.foto) +
     '" alt="' + escapeHtml(D.name(car) + ' no showroom') + '"' + (lazy ? ' loading="lazy"' : '') + '>';
-  const unit = (value, symbol) => D.decimal.format(value) + ' ' + symbol;
+  const unit = (value, symbol) => Number.isFinite(value) ? D.decimal.format(value) + ' ' + symbol : '—';
+  const gap = milliseconds => '+' + (milliseconds / 1000).toFixed(3) + ' s';
   const hasPrice = value => Number.isFinite(value) && value > 0;
   const priceText = value => hasPrice(value) ? D.currency.format(value) : 'Sem valor estimado';
-  const base = page === 'carro' ? 'garagem' : ['adicionar', 'editar'].includes(page) ? 'gerenciar' : page;
+  const adminPages = ['gerenciar', 'adicionar', 'editar', 'rascunhos', 'lotes', 'previa'];
+  const base = ['carro', 'comparar'].includes(page) ? 'garagem' : adminPages.includes(page) ? 'gerenciar' : page;
   const brand = '<span class="monogram" aria-hidden="true">P</span><span class="wordmark">PRESTES<small>RACING</small></span>';
   const section = (title, body, action = '') => '<section class="section wrap"><div class="section-head"><h2>' +
     title + '</h2>' + action + '</div>' + body + '</section>';
@@ -49,56 +54,85 @@
     url('inicio') + '" aria-label="Prestes Racing, início">' + brand +
     '</a><span><i class="brasil" aria-hidden="true"></i> Temporada 2026 · Magione, Itália</span></div>';
 
-  function rankingTable(rows, pool = rows, order = 'tempo', offset = 0) {
+  function rankingTable(rows, pool = rows, order = 'tempo', showGap = false) {
     const column = { potencia: ['Potência', 'cv'], velocidade: ['Velocidade na pista', 'km/h'], peso: ['Peso', 'kg'] }[order];
-    const content = rows.map((car, index) => {
-      const pos = order === 'tempo' ? D.position(pool, car) : offset + index + 1;
+    const positions = new Map(pool.map((car, index) => [car.id, index + 1]));
+    const leader = showGap ? Math.min(...pool.map(car => car.tempo)) : 0;
+    const content = rows.map(car => {
+      const pos = order === 'tempo' ? D.position(pool, car) : positions.get(car.id);
       const medal = order === 'tempo' && pos <= 3 ? ' podium-' + pos : '';
       return '<tr><td class="rank-number' + medal + '">' + pos + 'º</td><th scope="row">' +
         link('carro', D.name(car), 'car-link', car.id) + '</th><td>' + D.categories[car.categoria] +
         '</td><td class="lap">' + D.lap(car.tempo) + '</td>' +
+        (showGap ? '<td class="lap gap">' + (car.tempo === leader ? '—' : gap(car.tempo - leader)) + '</td>' : '') +
         (column ? '<td class="lap">' + unit(car[order], column[1]) + '</td>' : '') + '</tr>';
     }).join('');
     return '<div class="table-frame"><table><thead><tr><th scope="col">Pos.</th><th scope="col">Carro</th>' +
       '<th scope="col">Categoria</th><th scope="col">Melhor volta</th>' +
+      (showGap ? '<th scope="col">Gap pro líder</th>' : '') +
       (column ? '<th scope="col">' + column[0] + '</th>' : '') +
       '</tr></thead><tbody>' + (content || '<tr><td class="table-empty" colspan="' +
-      (column ? 5 : 4) + '">Nenhuma volta foi registrada nesta classificação.</td></tr>') + '</tbody></table></div>';
+      (4 + Number(Boolean(column)) + Number(showGap)) + '">Nenhum carro encontrado nesta classificação.</td></tr>') +
+      '</tbody></table></div>';
   }
 
-  function cards(items, showPrice) {
+  function podium(items) {
+    if (!items.length) return '';
+    return '<div class="podium" aria-label="Pódio do Ranking Geral">' +
+      items.map((car, index) => '<a class="podium-card place-' + (index + 1) + '" href="' + url('carro', car.id) + '">' +
+        photo(car) + '<div class="card-copy"><span class="podium-' + (index + 1) + '">' + (index + 1) +
+        'º lugar</span><h3>' + escapeHtml(D.name(car)) + '</h3><strong class="lap">' + D.lap(car.tempo) +
+        '</strong></div></a>').join('') + '</div>';
+  }
+
+  function cards(items, showPrice, chosen) {
     if (!items.length) return empty('Nenhum carro encontrado.');
     return '<div class="car-grid' + (showPrice ? ' garage-grid' : '') + '">' +
-      items.map(car => '<a class="car-card" href="' + url('carro', car.id) + '">' + photo(car) +
+      items.map(car => '<article class="car-card"><a href="' + url('carro', car.id) + '">' + photo(car) +
         '<div class="card-copy"><h3>' + escapeHtml(D.name(car)) + '</h3><span class="lap">' + D.lap(car.tempo) +
         '</span>' + (showPrice ? '<span class="price">' + priceText(car.valor) + '</span>' : '') +
-        '</div></a>').join('') + '</div>';
+        '</div></a>' + (chosen ? '<button class="secondary compare-pick" type="button" data-compare="' +
+          escapeHtml(car.id) + '" aria-pressed="' + chosen.has(car.id) + '" aria-label="Comparar ' +
+          escapeHtml(D.name(car)) + '">' + (chosen.has(car.id) ? 'Selecionado' : 'Selecionar pra comparar') +
+          '</button>' : '') + '</article>').join('') + '</div>';
   }
 
   function recordCards(withPhoto) {
-    return '<div class="record-grid">' + Object.entries(titles).map(([order, [title, format]]) => {
-      const car = D.ordered(cars, order)[0];
-      const content = (withPhoto && car ? photo(car) : '') + '<div class="card-copy"><h3>' + title + '</h3>' +
-        '<strong class="record-value">' + (car ? format(car) : '—') + '</strong><span>' +
-        (car ? escapeHtml(D.name(car)) : 'Aguardando a primeira volta') + '</span></div>';
-      return car ? '<a class="record-card" href="' + url('carro', car.id) + '">' + content + '</a>' :
-        '<article class="record-card">' + content + '</article>';
+    return '<div class="record-grid record-grid-v2">' + Object.entries(titles).map(([order, [title, format]]) => {
+      const leaders = D.holders(cars, order);
+      const photos = withPhoto && leaders.length ? '<div class="record-photos">' +
+        leaders.map(car => '<a href="' + url('carro', car.id) + '" aria-label="' + escapeHtml(D.name(car)) + '">' +
+          photo(car) + '</a>').join('') + '</div>' : '';
+      const priceCard = order === 'valor';
+      let value = leaders.length ? escapeHtml(format(leaders[0])) : '—';
+      if (priceCard && leaders.length) {
+        const parts = D.currency.formatToParts(leaders[0].valor);
+        const currency = parts.find(part => part.type === 'currency')?.value || 'US$';
+        const amount = parts.filter(part => part.type !== 'currency').map(part => part.value).join('').trim();
+        value = '<span class="record-currency">' + escapeHtml(currency) + '</span> ' +
+          '<span class="record-amount">' + escapeHtml(amount) + '</span>';
+      }
+      return '<article class="record-card' + (priceCard ? ' record-card-price' : '') + '">' +
+        photos + '<div class="card-copy"><h3>' + title + '</h3>' +
+        '<strong class="record-value">' + value + '</strong>' +
+        '<div class="record-holders">' + (leaders.map(car => link('carro', D.name(car), 'car-link', car.id)).join('') ||
+        'Aguardando o primeiro resultado') + '</div></div></article>';
     }).join('') + '</div>';
   }
 
   function track() {
-    return '<section class="track-section"><div class="wrap track-grid"><figure><img loading="lazy" src="' +
-      root + 'assets/tracado-magione.png" alt="Traçado de Magione com as 11 curvas numeradas">' +
-      '<figcaption>Traçado adaptado de <a href="https://commons.wikimedia.org/wiki/File:Autodromo_di_Magione_Track_Layout.svg">Blanders506</a> · ' +
-      '<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a></figcaption></figure>' +
-      '<div><h2>Conheça a pista</h2><p>Inaugurado em 1973 na Úmbria, na Itália, o Autódromo de Magione nasceu por iniciativa da Scuderia Carpine. ' +
+    return '<section class="track-section"><div class="wrap track-story"><h2>História do circuito</h2><p>Inaugurado em 1973 na Úmbria, na Itália, o Autódromo de Magione nasceu por iniciativa da Scuderia Carpine. ' +
       'O traçado original tinha 1.650 metros e logo se destacou pela pilotagem técnica. Em 1996, a pista foi ampliada para 2.507 metros, ' +
       'com novos boxes e um paddock maior.</p>' +
       '<p>Na história do Prestes Racing, Carlos Prestes comprou o autódromo em 2026 e o rebatizou de <strong>Prestes Motorsport Park</strong>. ' +
       'A reforma modernizou o circuito de ponta a ponta, com asfalto novo, áreas de escape ampliadas, novas arquibancadas e um complexo de boxes e paddock renovado. ' +
       'O autódromo virou a casa das voltas rápidas do canal e ganhou estrutura para receber provas de <strong>GT3, Fórmula 4 e outras categorias de turismo e monopostos</strong>.</p>' +
       '<dl class="track-stats"><div><dt>Extensão</dt><dd>2.507 m</dd></div><div><dt>Curvas</dt><dd>11</dd></div>' +
-      '<div><dt>Local</dt><dd>Magione, Itália</dd></div></dl></div></div></section>';
+      '<div><dt>Local</dt><dd>Magione, Itália</dd></div></dl></div></section>' +
+      section('Mapa do traçado', '<figure class="track-map"><a href="' + root + 'assets/tracado-magione.png">' +
+        '<img src="' + root + 'assets/tracado-magione.png" alt="Abrir mapa do circuito com as 11 curvas numeradas"></a>' +
+        '<figcaption>Traçado adaptado de <a href="https://commons.wikimedia.org/wiki/File:Autodromo_di_Magione_Track_Layout.svg">Blanders506</a> · ' +
+        '<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a></figcaption></figure>');
   }
 
   function home() {
@@ -117,10 +151,13 @@
       section('Garagem', byEpisode.length ? cards(byEpisode.slice(0, 5), false) : empty('A garagem está pronta para receber os primeiros carros.'),
         link('garagem', 'Ver garagem completa')) +
       section('Recordes', recordCards(false), link('recordes', 'Ver todos os recordes')) +
-      section('Último episódio', last ? '<article class="featured">' + photo(last) + '<div class="card-copy"><span>Episódio ' +
+      section('Última Volta Rápida', last ? '<article class="featured">' + photo(last) + '<div class="card-copy"><span>Volta Rápida nº ' +
         String(last.episodio).padStart(2, '0') + '</span><h3>' + escapeHtml(D.name(last)) + '</h3>' +
-        link('carro', 'Ver ficha do carro', 'button', last.id) + '</div></article>' : empty('Os dados do primeiro episódio aparecem aqui assim que forem publicados.')) +
-      track();
+        '<strong class="lap">' + D.lap(last.tempo) + '</strong>' + link('carro', 'Ver ficha do carro', 'button', last.id) + '</div></article>' : empty('A primeira Volta Rápida aparece aqui assim que for publicada.')) +
+      section('Conheça a pista', '<a class="track-teaser" href="' + url('pista') + '">' +
+        '<img loading="lazy" src="' + root + 'assets/pista-aerea.webp" alt="Vista aérea do circuito">' +
+        '<span>Magione, Itália · 2.507 m · 11 curvas</span></a>', link('pista', 'Conheça a pista'));
+
     if (pictures.length > 1) carousel();
   }
 
@@ -166,21 +203,30 @@
   }
 
   function ranking() {
+    const counts = Object.create(null);
+    for (const car of cars) counts[car.categoria] = (counts[car.categoria] || 0) + 1;
     main.innerHTML = '<section class="wrap content">' + intro('Ranking', 'Classificação das voltas do Prestes Racing em Magione.') +
-      '<div class="filters"><div id="categories" class="chips" aria-label="Categoria">' +
+      '<div class="ranking-controls"><div class="chips" aria-label="Categoria">' +
       Object.entries({ geral: 'Geral', ...D.categories }).map(([id, name]) =>
-        '<button type="button" data-category="' + id + '" aria-pressed="' + (id === 'geral') + '">' + name + '</button>'
-      ).join('') + '</div><label>Ordenar por<select id="order">' +
-      Object.entries(D.orders).map(([id, [name]]) => '<option value="' + id + '">' + name + '</option>').join('') +
-      '</select></label></div><div id="result" tabindex="-1" aria-live="polite"></div></section>';
+        '<button type="button" data-category="' + id + '" aria-pressed="' + (id === 'geral') + '">' + name +
+        ' <span>(' + (id === 'geral' ? cars.length : counts[id] || 0) + ')</span></button>'
+      ).join('') + '</div><div class="ranking-fields"><label>Buscar carro<input id="search" type="search" placeholder="Marca ou modelo"></label>' +
+      '<label>Ordenar por<select id="order">' + Object.entries(D.orders).map(([id, [name]]) =>
+        '<option value="' + id + '">' + name + '</option>').join('') +
+      '</select></label></div></div><div id="podium"></div><div id="result" tabindex="-1" aria-live="polite"></div></section>';
     const result = main.querySelector('#result');
     const order = main.querySelector('#order');
+    const search = main.querySelector('#search');
     let category = 'geral';
     function render(pageNumber = 1) {
       const list = D.ordered(category === 'geral' ? cars : cars.filter(car => car.categoria === category), order.value);
+      const query = D.normalize(search.value.trim());
+      const matches = list.filter(car => D.normalize(D.name(car)).includes(query));
+      main.querySelector('#podium').innerHTML = category === 'geral' && order.value === 'tempo' && !query && pageNumber === 1 ?
+        podium(byLap.slice(0, 3)) : '';
       const offset = (pageNumber - 1) * 25;
-      result.innerHTML = rankingTable(list.slice(offset, offset + 25), list, order.value, offset);
-      paginate(list.length, 25, pageNumber, result, render);
+      result.innerHTML = rankingTable(matches.slice(offset, offset + 25), list, order.value, true);
+      paginate(matches.length, 25, pageNumber, result, render);
     }
     main.querySelectorAll('[data-category]').forEach(button => button.onclick = () => {
       main.querySelector('[aria-pressed="true"]').setAttribute('aria-pressed', 'false');
@@ -188,34 +234,136 @@
       category = button.dataset.category;
       render();
     });
-    order.onchange = () => render();
+    order.onchange = search.oninput = () => render();
     render();
   }
 
   function garage() {
+    const prices = cars.filter(car => hasPrice(car.valor)).map(car => car.valor);
+    const floor = prices.length ? Math.min(...prices) : 0;
+    const ceiling = prices.length ? Math.max(...prices) : 0;
+    const range = (id, label, value) => '<div class="price-endpoint"><label for="' + id + '">' + label +
+      '</label><span id="' + id + '-amount"></span><input id="' + id + '" type="range" min="' + floor +
+      '" max="' + ceiling + '" step="0.01" value="' + value + '"' + (floor === ceiling ? ' disabled' : '') + '></div>';
     main.innerHTML = '<section class="wrap content">' + intro('Garagem', 'Fichas dos carros testados na pista, por tempo de volta.') +
       '<div class="filters garage-filters"><label>Marca ou modelo<input id="search" type="search" placeholder="Buscar na garagem"></label>' +
-      '<fieldset><legend>Faixa de preço (US$)</legend><label>Mínimo<input id="min" type="number" min="0" inputmode="decimal"></label>' +
-      '<label>Máximo<input id="max" type="number" min="0" inputmode="decimal"></label></fieldset></div>' +
+      '<label>Categoria<select id="category"><option value="">Todas</option>' +
+      Object.entries(D.categories).map(([id, name]) => '<option value="' + id + '">' + name + '</option>').join('') +
+      '</select></label><fieldset class="price-slider"><legend>Faixa de preço (US$)</legend>' +
+      (prices.length ? range('min', 'Mínimo', floor) + range('max', 'Máximo', ceiling) : '<span>Sem preços cadastrados</span>') +
+      '</fieldset></div><div id="compare-bar" class="compare-bar" aria-live="polite"></div>' +
       '<div id="result" tabindex="-1" aria-live="polite"></div></section>';
     const search = main.querySelector('#search');
+    const category = main.querySelector('#category');
     const min = main.querySelector('#min');
     const max = main.querySelector('#max');
     const result = main.querySelector('#result');
+    const bar = main.querySelector('#compare-bar');
+    const chosen = new Set();
     function render(pageNumber = 1) {
-      const low = min.value ? Number(min.value) : 0;
-      const high = max.value ? Number(max.value) : Infinity;
-      if (low < 0 || high < low) { result.innerHTML = empty('Informe uma faixa de preço válida.'); return; }
+      const low = Number(min?.value ?? floor);
+      const high = Number(max?.value ?? ceiling);
+      if (min) {
+        main.querySelector('#min-amount').textContent = priceText(low);
+        main.querySelector('#max-amount').textContent = priceText(high);
+        const slider = min.closest('fieldset');
+        slider.style.setProperty('--min-percent', ((low - floor) / (ceiling - floor || 1) * 100) + '%');
+        slider.style.setProperty('--max-percent', ((high - floor) / (ceiling - floor || 1) * 100) + '%');
+        min.setAttribute('aria-valuetext', priceText(low));
+        max.setAttribute('aria-valuetext', priceText(high));
+        slider.classList.toggle('minimum-front', low === high && high === ceiling);
+      }
       const query = D.normalize(search.value.trim());
-      const hasRange = min.value !== '' || max.value !== '';
-      const items = byLap.filter(car => D.normalize(D.name(car)).includes(query) &&
-        (!hasRange || (hasPrice(car.valor) && car.valor >= low && car.valor <= high)));
+      const matches = byLap.filter(car => D.normalize(D.name(car)).includes(query) &&
+        (!category.value || car.categoria === category.value));
+      const priced = matches.filter(car => hasPrice(car.valor) && car.valor >= low && car.valor <= high);
+      const unpriced = matches.filter(car => !hasPrice(car.valor));
+      const items = [...priced, ...unpriced];
       const offset = (pageNumber - 1) * 20;
-      result.innerHTML = cards(items.slice(offset, offset + 20), true);
+      const visible = items.slice(offset, offset + 20);
+      const withPrice = visible.filter(car => hasPrice(car.valor));
+      const withoutPrice = visible.filter(car => !hasPrice(car.valor));
+      result.innerHTML = (withPrice.length ? cards(withPrice, true, chosen) : '') +
+        (withoutPrice.length ? '<h2 class="subsection-title">Sem valor estimado</h2>' + cards(withoutPrice, true, chosen) : '') +
+        (!visible.length ? empty('Nenhum carro encontrado.') : '');
       paginate(items.length, 20, pageNumber, result, render);
     }
-    [search, min, max].forEach(input => input.oninput = () => render());
+    function updateComparison(message = '') {
+      const selected = [...chosen];
+      bar.innerHTML = '<span>' + (message || (selected.length ? escapeHtml(selected.map(id => D.name(cars.find(car => car.id === id))).join(' · ')) :
+        'Selecione dois carros para comparar.')) + '</span>' +
+        (selected.length ? '<button type="button" class="secondary" data-clear>Limpar seleção</button>' : '') +
+        (selected.length === 2 ? '<a class="button" href="' + url('comparar') + '?' +
+          new URLSearchParams({ a: selected[0], b: selected[1] }).toString().replaceAll('&', '&amp;') + '">Comparar carros</a>' : '');
+    }
+    result.addEventListener('click', event => {
+      const button = event.target.closest('[data-compare]');
+      if (!button) return;
+      const id = button.dataset.compare;
+      if (chosen.has(id)) chosen.delete(id);
+      else if (chosen.size < 2) chosen.add(id);
+      else { updateComparison('Remova um carro da seleção pra comparar outro.'); return; }
+      button.textContent = chosen.has(id) ? 'Selecionado' : 'Selecionar pra comparar';
+      button.setAttribute('aria-pressed', chosen.has(id));
+      updateComparison();
+    });
+    bar.addEventListener('click', event => {
+      if (!event.target.matches('[data-clear]')) return;
+      chosen.clear();
+      result.querySelectorAll('[data-compare]').forEach(button => {
+        button.setAttribute('aria-pressed', 'false');
+        button.textContent = 'Selecionar pra comparar';
+      });
+      updateComparison();
+      search.focus();
+    });
+    if (min) {
+      min.oninput = () => { if (+min.value > +max.value) min.value = max.value; render(); };
+      max.oninput = () => { if (+max.value < +min.value) max.value = min.value; render(); };
+    }
+    search.oninput = category.onchange = () => render();
+    updateComparison();
     render();
+  }
+
+  function compare() {
+    const pair = ['a', 'b'].map(key => cars.find(car => car.id === params.get(key)));
+    if (!pair.every(Boolean) || pair[0].id === pair[1].id) {
+      main.innerHTML = '<section class="wrap content">' + intro('Comparar carros', 'Escolha dois carros na Garagem.') +
+        link('garagem', 'Ir à Garagem') + '</section>';
+      return;
+    }
+    const best = Math.min(...pair.map(car => car.tempo));
+    const rows = [
+      ['Melhor volta', car => D.lap(car.tempo)], ['Diferença entre as voltas', car => car.tempo === best ? '—' : gap(car.tempo - best)],
+      ['Velocidade na pista', car => unit(car.velocidade, 'km/h')], ['Potência', car => unit(car.potencia, 'cv')],
+      ['Peso', car => unit(car.peso, 'kg')], ['Valor', car => priceText(car.valor)]
+    ];
+    main.innerHTML = '<section class="wrap content">' + link('garagem', 'Voltar à Garagem', 'back-link') + intro('Comparar carros') +
+      '<div class="table-frame compare-table"><table><thead><tr><th scope="col">Dados</th>' +
+      pair.map(car => '<th scope="col"><a class="car-link" href="' + url('carro', car.id) + '">' +
+        photo(car) + escapeHtml(D.name(car)) + '</a></th>').join('') + '</tr></thead><tbody>' +
+      rows.map(([label, format]) => '<tr><th scope="row">' + label + '</th>' +
+        pair.map(car => '<td class="lap">' + escapeHtml(format(car)) + '</td>').join('') + '</tr>').join('') +
+      '</tbody></table></div></section>';
+  }
+
+  function detailMarkup(car, pool, preview = false) {
+    const cat = D.categories[car.categoria] || '—';
+    const tech = [['Ano', car.ano], ['Categoria', cat], ['Motor', car.motor], ['Transmissão', car.transmissao],
+      ['Potência', unit(car.potencia, 'cv'), 'potencia'], ['Torque', unit(car.torque, 'Nm'), 'torque'], ['Peso', unit(car.peso, 'kg'), 'peso'],
+      ['Valor de referência', priceText(car.valor)]];
+    const stats = [['Melhor volta', car.tempo ? D.lap(car.tempo) : '—'], ['Velocidade máxima na pista', unit(car.velocidade, 'km/h')],
+      ['Posição no Geral', car.tempo ? D.position(pool, car) + 'º' : '—'],
+      ['Posição em ' + cat, car.tempo && car.categoria ? D.position(pool.filter(other => other.categoria === car.categoria), car) + 'º' : '—']];
+    return '<article class="wrap content detail">' +
+      (preview ? '<p class="preview-label">Prévia da ficha</p>' : link('garagem', 'Voltar à Garagem', 'back-link')) +
+      photo(car, false) + intro(escapeHtml(D.name(car).trim() || 'Carro sem nome'),
+        'Volta Rápida nº ' + (car.episodio ? String(car.episodio).padStart(2, '0') : '—') +
+        (car.teste ? ' · Dados de teste' : '')) + '<dl class="detail-stats">' + specs(stats) + '</dl>' +
+      (car.historia ? '<section class="car-history"><h2>História do carro</h2><p>' + escapeHtml(car.historia) + '</p></section>' : '') +
+      '<h2>Ficha técnica</h2><dl class="specs">' + specs(tech.map(([label, value, key]) =>
+        [label, value, D.sourceLabels[car.fontes?.[key]]])) + '</dl></article>';
   }
 
   function detail() {
@@ -224,267 +372,51 @@
         link('garagem', 'Voltar à Garagem') + '</section>';
       return;
     }
-    const car = current;
-    const cat = D.categories[car.categoria];
-    const tech = [['Ano', car.ano], ['Categoria', cat], ['Motor', car.motor], ['Transmissão', car.transmissao],
-      ['Potência', unit(car.potencia, 'cv')], ['Torque', unit(car.torque, 'Nm')], ['Peso', unit(car.peso, 'kg')],
-      ['Valor de referência', priceText(car.valor)]];
-    const stats = [['Melhor volta', D.lap(car.tempo)], ['Velocidade máxima na pista', unit(car.velocidade, 'km/h')],
-      ['Posição no Geral', D.position(cars, car) + 'º'],
-      ['Posição em ' + cat, D.position(cars.filter(other => other.categoria === car.categoria), car) + 'º']];
-    document.title = D.name(car) + ' | Prestes Racing';
-    main.innerHTML = '<article class="wrap content detail">' + link('garagem', 'Voltar à Garagem', 'back-link') + photo(car, false) +
-      intro(escapeHtml(D.name(car)), 'Episódio ' + String(car.episodio).padStart(2, '0') + (car.teste ? ' · Dados fictícios para teste' : '')) +
-      '<dl class="detail-stats">' + specs(stats) + '</dl><h2>Ficha técnica</h2><dl class="specs">' + specs(tech) + '</dl></article>';
+    document.title = D.name(current) + ' | Prestes Racing';
+    main.innerHTML = detailMarkup(current, cars);
+  }
+
+  function circuit() {
+    main.innerHTML = '<section class="wrap content">' + intro('Prestes Motorsport Park', 'Magione, Itália') + '</section>' +
+      track() + section('Fotos da pista', '<div class="track-photos">' +
+        window.FOTOS_DA_PISTA.map(({ arquivo, descricao }) => '<figure><img loading="lazy" src="' +
+          escapeHtml(root + 'assets/' + arquivo) + '" alt="' + escapeHtml(descricao) + '"><figcaption>' +
+          escapeHtml(descricao) + '</figcaption></figure>').join('') + '</div>');
   }
 
   function specs(rows) {
-    return rows.map(([label, value]) => '<div><dt>' + escapeHtml(label) + '</dt><dd>' +
-      escapeHtml(value) + '</dd></div>').join('');
+    return rows.map(([label, value, source]) => '<div><dt>' + escapeHtml(label) + '</dt><dd>' +
+      escapeHtml(value ?? '—') + (source ? '<small>' + escapeHtml(source) + '</small>' : '') + '</dd></div>').join('');
   }
 
   function records() {
     const rows = Object.entries(D.categories).map(([id, label]) => {
-      const car = byLap.find(item => item.categoria === id);
-      return '<tr><th scope="row">' + label + '</th><td>' + (car ? link('carro', D.name(car), 'car-link', car.id) : '—') +
-        '</td><td class="lap">' + (car ? D.lap(car.tempo) : '—') + '</td></tr>';
+      const leaders = D.holders(cars.filter(item => item.categoria === id), 'tempo');
+      return '<tr><th scope="row">' + label + '</th><td><div class="record-holders">' +
+        (leaders.map(car => link('carro', D.name(car), 'car-link', car.id)).join('') || '—') +
+        '</div></td><td class="lap">' + (leaders.length ? D.lap(leaders[0].tempo) : '—') + '</td></tr>';
+    }).join('');
+    const history = [...(catalog.history || [])].reverse();
+    const historyMarkup = history.map(item => {
+      const label = item.category ? 'Melhor volta · ' + D.categories[item.category] : titles[item.metric]?.[0];
+      const format = titles[item.metric]?.[1];
+      return '<li><strong>' + escapeHtml(label) + '</strong><span>' +
+        escapeHtml(item.before.names.join(', ')) + ' (' + escapeHtml(format({ [item.metric]: item.before.value })) +
+        ') → ' + escapeHtml(item.after.names.join(', ')) + ' (' + escapeHtml(format({ [item.metric]: item.after.value })) +
+        ') · Volta Rápida nº ' + escapeHtml(item.episodio) + '</span></li>';
     }).join('');
     main.innerHTML = '<section class="wrap content">' + intro('Recordes') + recordCards(true) +
       '<h2 class="subsection-title">Melhores voltas por categoria</h2><div class="table-frame"><table><thead><tr>' +
       '<th scope="col">Categoria</th><th scope="col">Carro</th><th scope="col">Melhor volta</th></tr></thead><tbody>' +
-      rows + '</tbody></table></div></section>';
+      rows + '</tbody></table></div><details class="record-history"><summary>Histórico de recordes</summary>' +
+      (historyMarkup ? '<ul>' + historyMarkup + '</ul>' : '<p>As próximas quebras de recorde aparecem aqui.</p>') +
+      '</details></section>';
   }
 
-  function admin() {
-    const rows = byEpisode.map(car => '<li><span><strong>' + escapeHtml(D.name(car)) + '</strong><small>' +
-      D.categories[car.categoria] + ' · Episódio ' + car.episodio + '</small></span>' +
-      link('editar', 'Editar', 'button secondary', car.id) + '</li>').join('');
-    main.innerHTML = '<section class="wrap content">' + intro('Gerenciar', 'Cadastre e atualize os carros do Prestes Racing.') +
-      '<div class="admin-bar"><label>Buscar carro<input type="search" id="admin-search" placeholder="Marca ou modelo"></label>' +
-      link('adicionar', 'Adicionar carro') + '</div><ul id="admin-list" class="admin-list">' + rows + '</ul>' +
-      '<div id="admin-empty" class="empty"><p>Nenhum carro encontrado.</p></div>' + tokenPanel() + '</section>';
-    main.querySelector('#admin-empty').hidden = cars.length > 0;
-    main.querySelector('#admin-search').oninput = event => {
-      const query = D.normalize(event.target.value.trim());
-      const items = [...main.querySelectorAll('#admin-list li')];
-      items.forEach((item, index) => { item.hidden = !D.normalize(D.name(byEpisode[index])).includes(query); });
-      main.querySelector('#admin-empty').hidden = items.some(item => !item.hidden);
-    };
-    tokenControls();
+  if (adminPages.includes(page)) {
+    await window.PrestesAdmin({ D, root, page, main, params, catalog, url, link, photo, intro, empty, escapeHtml,
+      detailMarkup, hasPrice });
+  } else {
+    ({ inicio: home, ranking, garagem: garage, carro: detail, recordes: records, pista: circuit, comparar: compare })[page]();
   }
-
-  function tokenPanel() {
-    return '<section class="token-panel"><h2>Publicação no GitHub</h2><p>Repositório <strong>' + D.remote +
-      '</strong>. Use um token com permissão de leitura e escrita em <strong>Contents</strong>.</p>' +
-      '<div class="admin-bar"><label>Token do GitHub<input id="token" type="password" autocomplete="off" spellcheck="false"></label>' +
-      '<button type="button" id="validate" class="secondary">Validar token</button></div>' +
-      '<p id="token-status" class="status" role="status"></p></section>';
-  }
-
-  function tokenControls() {
-    const input = main.querySelector('#token');
-    const status = main.querySelector('#token-status');
-    const validate = main.querySelector('#validate');
-    const writeButtons = main.querySelectorAll('#publish, #confirm-delete');
-    let access = null;
-    input.addEventListener('input', () => {
-      access = null;
-      status.textContent = '';
-      writeButtons.forEach(button => { button.disabled = true; });
-    });
-    validate.onclick = async () => {
-      const token = input.value.trim();
-      if (!token) { status.textContent = 'Informe o token do GitHub.'; input.focus(); return; }
-      validate.disabled = true;
-      input.disabled = true;
-      status.textContent = 'Validando com o GitHub…';
-      try {
-        access = { token, branch: await D.validateToken(token) };
-        status.textContent = 'Token validado com permissão de escrita.';
-        writeButtons.forEach(button => { button.disabled = false; });
-      } catch (error) {
-        status.textContent = error.message;
-      } finally {
-        validate.disabled = false;
-        input.disabled = false;
-      }
-    };
-    return () => access;
-  }
-
-  function carForm() {
-    const edit = page === 'editar';
-    const localPreview = D.preview() && location.protocol !== 'file:';
-    if (edit && !current) {
-      main.innerHTML = '<section class="wrap content">' + intro('Ficha indisponível') +
-        link('gerenciar', 'Voltar a Gerenciar') + '</section>';
-      return;
-    }
-    const inputs = [
-      ['marca', 'Marca'], ['modelo', 'Modelo'], ['ano', 'Ano', 'number', '1886', '2100', '1'],
-      ['episodio', 'Episódio', 'number', '1', '99999', '1'], ['motor', 'Motor'], ['transmissao', 'Transmissão'],
-      ['potencia', 'Potência (cv)', 'number'], ['torque', 'Torque (Nm)', 'number'], ['peso', 'Peso (kg)', 'number'],
-      ['tempo', 'Melhor volta', 'text'],
-      ['velocidade', 'Velocidade máxima na pista (km/h)', 'number']
-    ];
-    const ids = crypto.randomUUID ? () => crypto.randomUUID() : () =>
-      Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
-    const id = current?.id || ids();
-    function field([key, name, type = 'text', min = '0.01', max = '999999999', step = '0.01']) {
-      const value = key === 'tempo' && current ? D.lap(current.tempo) : current?.[key] ?? '';
-      const constraints = type === 'number' ? ' min="' + min + '" max="' + max + '" step="' + step + '"' :
-        key === 'tempo' ? ' placeholder="1:12.870" pattern="[0-9]{1,2}:[0-5][0-9][.,][0-9]{3}"' : ' maxlength="100"';
-      return '<label>' + name + '<input required name="' + key + '" type="' + type + '" value="' +
-        escapeHtml(value) + '"' + constraints + '></label>';
-    }
-    const category = '<label>Categoria<select required name="categoria"><option value="">Selecione</option>' +
-      Object.entries(D.categories).map(([key, name]) => '<option value="' + key + '"' +
-        (current?.categoria === key ? ' selected' : '') + '>' + name + '</option>').join('') + '</select></label>';
-    const unknownPrice = edit && !hasPrice(current.valor);
-    const priceField = '<div class="price-field"><label>Valor de referência (US$)<input name="valor" type="number" min="0.01" max="999999999" step="0.01"' +
-      (unknownPrice ? ' disabled' : ' required') + ' value="' + (hasPrice(current?.valor) ? current.valor : '') +
-      '"></label><label class="price-option"><input id="unknown-price" name="semValor" type="checkbox"' +
-      (unknownPrice ? ' checked' : '') + '> Sem valor estimado</label></div>';
-    main.innerHTML = '<section class="wrap content form-page">' + link('gerenciar', 'Voltar a Gerenciar', 'back-link') +
-      intro(edit ? 'Editar carro' : 'Adicionar carro') +
-      '<form id="car-form"><h2>Ficha técnica</h2><div class="form-grid">' + inputs.slice(0, -2).map(field).join('') +
-      priceField + category + '</div><h2>Dados da volta</h2><div class="form-grid">' + inputs.slice(-2).map(field).join('') +
-      '</div><h2>Foto no showroom</h2><label>Arquivo JPG, PNG ou WebP<input name="foto" type="file" accept="image/jpeg,image/png,image/webp"' +
-      (edit ? '' : ' required') + '></label>' + (edit ? '<div class="form-photo">' + photo(current) + '</div>' : '') +
-      tokenPanel() + '<div class="form-actions"><button id="publish" type="submit" disabled>Publicar</button>' +
-      (localPreview ? '<button id="local-save" type="submit" class="secondary">Salvar teste local</button>' : '') +
-      '</div><p class="status" id="save-status" role="status"></p>' +
-      (edit ? removalPanel(localPreview) : '') + '</form></section>';
-    const getAccess = tokenControls();
-    const form = main.querySelector('#car-form');
-    const status = main.querySelector('#save-status');
-    const priceInput = form.elements.namedItem('valor');
-    const noPrice = form.elements.namedItem('semValor');
-    function updatePriceField() {
-      priceInput.disabled = noPrice.checked;
-      priceInput.required = !noPrice.checked;
-    }
-    noPrice.onchange = updatePriceField;
-    updatePriceField();
-    if (edit) removalControls(form, getAccess);
-    form.onsubmit = async event => {
-      event.preventDefault();
-      const local = event.submitter?.id === 'local-save';
-      const access = getAccess();
-      if (!local && !access) { status.textContent = 'Valide o token para publicar.'; return; }
-      const data = new FormData(form);
-      const car = { id, criado: current?.criado || new Date().toISOString(), ...(current?.teste && { teste: true }) };
-      for (const [key, label, type] of inputs) {
-        const value = data.get(key).trim();
-        if (!value) { status.textContent = 'Preencha ' + label.toLowerCase() + '.'; return; }
-        car[key] = key === 'tempo' ? D.parseLap(value) : type === 'number' ? Number(value) : value;
-      }
-      if (!car.tempo) { status.textContent = 'Informe uma volta maior que zero.'; return; }
-      car.valor = data.has('semValor') ? null : Number(data.get('valor'));
-      if (car.valor !== null && !hasPrice(car.valor)) {
-        status.textContent = 'Informe um valor em dólares ou marque Sem valor estimado.';
-        return;
-      }
-      car.categoria = data.get('categoria');
-      const buttons = [...form.querySelectorAll('button')];
-      const oldDisabled = buttons.map(button => button.disabled);
-      buttons.forEach(button => { button.disabled = true; });
-      status.textContent = local ? 'Salvando teste…' : 'Publicando no GitHub…';
-      let done = false;
-      try {
-        const file = data.get('foto');
-        const extensions = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
-        let newPhoto;
-        if (file.size) {
-          if (!extensions[file.type]) throw new Error('Selecione uma foto JPG, PNG ou WebP.');
-          if (file.size > 8 * 1024 * 1024) throw new Error('A foto deve ter até 8 MB.');
-          newPhoto = await loadPhoto(file);
-          car.foto = local ? newPhoto : 'assets/carros/' + id + '.webp';
-        } else {
-          car.foto = current?.foto;
-          if (!local && car.foto?.startsWith('data:')) {
-            newPhoto = car.foto;
-            car.foto = 'assets/carros/' + id + '.webp';
-          }
-        }
-        if (!car.foto && !car.teste) throw new Error('Envie uma foto do showroom.');
-        car.foto ??= null;
-        if (local) {
-          D.saveDraft(D.upsert(catalog, car, current));
-          location.href = url('carro', car.id);
-        } else {
-          const sha = await D.publish(access.token, access.branch, car, current, newPhoto);
-          status.innerHTML = 'Ficha salva no GitHub. A disponibilidade no site depende da publicação do GitHub Pages. ' +
-            '<a href="https://github.com/' + D.remote + '/commit/' + sha + '">Ver publicação</a>';
-          done = true;
-        }
-      } catch (error) {
-        status.textContent = error instanceof Error ? error.message : 'Não foi possível salvar. Tente novamente.';
-      } finally {
-        if (!done) buttons.forEach((button, index) => { button.disabled = oldDisabled[index]; });
-      }
-    };
-  }
-
-  function removalPanel(localPreview) {
-    return '<details id="remove-car" class="token-panel"><summary>Excluir carro</summary>' +
-      '<p>Remover <strong>' + escapeHtml(D.name(current)) + '</strong> do catálogo? A ficha sai da Garagem, e o Ranking e os Recordes são recalculados. ' +
-      'Valide o token acima para confirmar a exclusão no GitHub.</p><div class="form-actions">' +
-      '<button type="button" id="confirm-delete" disabled>Confirmar exclusão</button>' +
-      '<button type="button" id="cancel-delete" class="secondary">Cancelar</button>' +
-      (localPreview ? '<button type="button" id="local-delete" class="secondary">Excluir teste local</button>' : '') +
-      '</div><p class="status" id="delete-status" role="status"></p></details>';
-  }
-
-  function removalControls(form, getAccess) {
-    const details = form.querySelector('#remove-car');
-    const status = form.querySelector('#delete-status');
-    const cancel = form.querySelector('#cancel-delete');
-    const local = form.querySelector('#local-delete');
-    const token = form.querySelector('#token');
-    const summary = details.querySelector('summary');
-    cancel.onclick = () => {
-      details.open = false;
-      summary.focus();
-    };
-    form.querySelector('#confirm-delete').onclick = () => submitRemoval(false);
-    if (local) local.onclick = () => submitRemoval(true);
-
-    async function submitRemoval(isLocal) {
-      const access = getAccess();
-      if (!isLocal && !access) return;
-      const controls = [...form.querySelectorAll('button'), token];
-      const states = controls.map(control => control.disabled);
-      controls.forEach(control => { control.disabled = true; });
-      status.textContent = isLocal ? 'Excluindo teste local…' : 'Excluindo no GitHub…';
-      try {
-        if (isLocal) {
-          D.saveDraft(D.remove(D.readDraft() || catalog, current));
-          location.href = url('gerenciar');
-        } else {
-          await D.publishRemoval(access.token, access.branch, current);
-          status.textContent = 'Carro excluído no GitHub. O site será atualizado pelo GitHub Pages.';
-        }
-      } catch (error) {
-        status.textContent = error instanceof Error ? error.message : 'Não foi possível excluir. Tente novamente.';
-        controls.forEach((control, index) => { control.disabled = states[index]; });
-      }
-    }
-  }
-
-  async function loadPhoto(file) {
-    let img;
-    try { img = await createImageBitmap(file); }
-    catch { throw new Error('Não foi possível abrir a foto. Selecione outro arquivo.'); }
-    const scale = Math.min(1, 1440 / Math.max(img.width, img.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(img.width * scale);
-    canvas.height = Math.round(img.height * scale);
-    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-    img.close();
-    return canvas.toDataURL('image/webp', 0.85);
-  }
-
-  ({ inicio: home, ranking, garagem: garage, carro: detail, recordes: records,
-    gerenciar: admin, adicionar: carForm, editar: carForm })[page]();
 })();
